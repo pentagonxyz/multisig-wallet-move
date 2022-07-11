@@ -5,6 +5,7 @@ module Multiture::MultisigWallet {
     use AptosFramework::Coin::{Self, Coin};
     use AptosFramework::IterableTable::{Self, IterableTable};
     use AptosFramework::Table::{Self, Table};
+    use AptosFramework::Token::{Self, Token, TokenId};
 
     struct MultisigBank has key {
         multisigs: vector<Multisig>
@@ -14,7 +15,8 @@ module Multiture::MultisigWallet {
         participants: IterableTable<address, bool>,
         approval_threshold: u64,
         cancellation_threshold: u64,
-        proposals: vector<Proposal>
+        proposals: vector<Proposal>,
+        tokens: IterableTable<TokenId, Token>
     }
 
     struct Proposal has store {
@@ -25,7 +27,14 @@ module Multiture::MultisigWallet {
         cancellation_votes: u64,
         approve_messages: vector<vector<u8>>,
         add_participants: vector<address>,
-        remove_participants: vector<address>
+        remove_participants: vector<address>,
+        withdraw_tokens: vector<PendingTokenWithdrawal>
+    }
+
+    struct PendingTokenWithdrawal has store, drop {
+        tokenId: TokenId,
+        value: u64,
+        recipient: address
     }
 
     struct AuthToken has copy, drop, store {
@@ -74,7 +83,7 @@ module Multiture::MultisigWallet {
 
     public fun create_multisig(participants: vector<address>, approval_threshold: u64, cancellation_threshold: u64): u64 acquires MultisigBank {
         // create multisig resource
-        let multisig = Multisig { participants: IterableTable::new(), approval_threshold, cancellation_threshold, proposals: Vector::empty() };
+        let multisig = Multisig { participants: IterableTable::new(), approval_threshold, cancellation_threshold, proposals: Vector::empty(), tokens: IterableTable::new() };
         while (!Vector::is_empty(&participants)) {
             let participant = Vector::pop_back(&mut participants);
             IterableTable::add(&mut multisig.participants, participant, true);
@@ -105,7 +114,8 @@ module Multiture::MultisigWallet {
         multisig_id: u64,
         add_participants: vector<address>,
         remove_participants: vector<address>,
-        approve_messages: vector<vector<u8>>
+        approve_messages: vector<vector<u8>>,
+        withdraw_tokens: vector<PendingTokenWithdrawal>
     ) acquires MultisigBank {
         // get mutable multisig from ID
         assert!(exists<MultisigBank>(@Multiture), 1000); // MULTISIG_BANK_DOES_NOT_EXIST
@@ -123,7 +133,8 @@ module Multiture::MultisigWallet {
             cancellation_votes: 0,
             add_participants,
             remove_participants,
-            approve_messages
+            approve_messages,
+            withdraw_tokens
         });
     }
 
@@ -254,16 +265,47 @@ module Multiture::MultisigWallet {
         // make sure there are changes to be made
         assert!(!Vector::is_empty(&proposal.remove_participants) || !Vector::is_empty(&proposal.add_participants), 1000); // NO_PENDING_PARTICIPANT_CHANGES
 
-        // execute removals
+        // execute participant removals
         while (!Vector::is_empty(&proposal.remove_participants)) {
             let participant = Vector::pop_back(&mut proposal.remove_participants);
             IterableTable::remove(&mut multisig.participants, participant);
         };
 
-        // execute additions
+        // execute participant additions
         while (!Vector::is_empty(&proposal.add_participants)) {
             let participant = Vector::pop_back(&mut proposal.add_participants);
             IterableTable::add(&mut multisig.participants, participant, true);
+        };
+    }
+
+    // note that this only executes Token withdrawals but not Coin withdrawals
+    public fun execute_token_withdrawals(dummy: &signer, multisig_id: u64, proposal_id: u64) acquires MultisigBank {
+        // get multisig and proposal from IDs
+        assert!(exists<MultisigBank>(@Multiture), 1000); // MULTISIG_BANK_DOES_NOT_EXIST
+        let multisigs = &mut borrow_global_mut<MultisigBank>(@Multiture).multisigs;
+        assert!(multisig_id <= Vector::length(multisigs), 1000); // MULTISIG_DOES_NOT_EXIST
+        let multisig = Vector::borrow_mut(multisigs, multisig_id);
+        assert!(proposal_id <= Vector::length(&multisig.proposals), 1000); // MULTISIG_DOES_NOT_EXIST
+        let proposal = Vector::borrow_mut(&mut multisig.proposals, proposal_id);
+
+        // make sure proposal has enough approval votes but is not cancelled
+        assert!(proposal.approval_votes >= multisig.approval_threshold, 1000); // NOT_ENOUGH_APPROVALS
+        assert!(proposal.cancellation_votes < multisig.cancellation_threshold, 1000); // PROPOSAL_ALREADY_CANCELED
+
+        // execute token withdrawals
+        while (!Vector::is_empty(&proposal.withdraw_tokens)) {
+            let pending_token_withdrawal = Vector::pop_back(&mut proposal.withdraw_tokens);
+            let multisig_token = IterableTable::remove(&mut multisig.tokens, pending_token_withdrawal.tokenId);
+            Token::deposit_token(dummy, multisig_token);
+            let tokens_available = Token::balance_of(Signer::address_of(dummy), pending_token_withdrawal.tokenId);
+            assert!(tokens_available >= pending_token_withdrawal.value, 1000); // INSUFFICIENT_TOKENS
+
+            if (tokens_available > pending_token_withdrawal.value) {
+                let change = Token::withdraw_token(dummy, pending_token_withdrawal.tokenId, tokens_available - pending_token_withdrawal.value);
+                IterableTable::add(&mut multisig.tokens, pending_token_withdrawal.tokenId, change);
+            };
+
+            Token::transfer(dummy, pending_token_withdrawal.tokenId, pending_token_withdrawal.recipient, pending_token_withdrawal.value);
         };
     }
 
