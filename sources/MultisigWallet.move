@@ -310,6 +310,7 @@ module MultisigWallet {
 
         // make sure proposal has enough votes
         assert!(proposal.approval_votes >= multisig.approval_threshold, 1000); // PROPOSAL_NOT_APPROVED
+        assert!(proposal.cancellation_votes < multisig.cancellation_threshold, 1000); // PROPOSAL_ALREADY_CANCELED
 
         // get withdrawal amount and remove pending withdrawal from map
         assert!(exists<PendingWithdrawalRecord<AssetType>>(auth_token.multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
