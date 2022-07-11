@@ -207,10 +207,7 @@ module MultisigWallet {
         assert(exists<PendingWithdrawalRecord<AssetType>>(multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
         let record = &mut borrow_global_mut<PendingWithdrawalRecord<AssetType>>(multisig_initiator).record;
         let combined_id = ProposalID { multisig_id, proposal_id };
-        if (Map::contains_key(record, &combined_id)) {
-            let old_amount = Map::remove(record, &combined_id);
-            amount = amount + old_amount;
-        };
+        if (Map::contains_key(record, &combined_id)) Map::remove(record, &combined_id);
         Map::insert(record, combined_id, amount)
     }
 
