@@ -50,15 +50,15 @@ module Multiture::MultisigWallet {
         proposal_id: u64
     }
 
-    struct DepositRecord<AssetType: copy + drop> has key {
+    struct DepositRecord<phantom AssetType> has key {
         record: Map::T<u64, Coin<AssetType>>
     }
 
-    struct PendingAuthedWithdrawalRecord<phantom AssetType: copy + drop> has key {
+    struct PendingAuthedWithdrawalRecord<phantom AssetType> has key {
         record: Map::T<ProposalID, u64>
     }
 
-    struct PendingWithdrawalTransferRecord<phantom AssetType: copy + drop> has key {
+    struct PendingWithdrawalTransferRecord<phantom AssetType> has key {
         record: Map::T<ProposalID, PendingWithdrawalTransfer>
     }
 
@@ -92,7 +92,7 @@ module Multiture::MultisigWallet {
         }
     }
 
-    public fun enable_deposits<AssetType: copy + drop + store>(account: &signer) {
+    public fun enable_deposits<AssetType>(account: &signer) {
         // validate deposits are not yet enabled
         let sender = Signer::address_of(account);
         assert!(!exists<DepositRecord<AssetType>>(sender), 1000); // DEPOSITS_ALREADY_ENABLED
@@ -103,7 +103,7 @@ module Multiture::MultisigWallet {
         move_to(account, PendingWithdrawalTransferRecord<AssetType> { record: Map::empty() });
     }
 
-    public fun deposit<AssetType: copy + drop + store>(multisig_initiator: address, multisig_id: u64, coin: Coin<AssetType>) acquires DepositRecord {
+    public fun deposit<AssetType>(multisig_initiator: address, multisig_id: u64, coin: Coin<AssetType>) acquires DepositRecord {
         // validate deposits are enabled for this asset
         assert!(exists<DepositRecord<AssetType>>(multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
 
@@ -144,7 +144,7 @@ module Multiture::MultisigWallet {
         });
     }
 
-    public fun request_authed_withdrawal<AssetType: copy + drop>(account: &signer, multisig_initiator: address, multisig_id: u64, proposal_id: u64, amount: u64)
+    public fun request_authed_withdrawal<AssetType>(account: &signer, multisig_initiator: address, multisig_id: u64, proposal_id: u64, amount: u64)
         acquires MultisigBank, PendingAuthedWithdrawalRecord
     {
         // get multisig and proposal from IDs
@@ -172,7 +172,7 @@ module Multiture::MultisigWallet {
         Map::insert(record, combined_id, amount)
     }
 
-    public fun request_withdrawal_transfer<AssetType: copy + drop>(account: &signer, multisig_initiator: address, multisig_id: u64, proposal_id: u64, recipient: address, amount: u64)
+    public fun request_withdrawal_transfer<AssetType>(account: &signer, multisig_initiator: address, multisig_id: u64, proposal_id: u64, recipient: address, amount: u64)
         acquires MultisigBank, PendingWithdrawalTransferRecord
     {
         // get multisig and proposal from IDs
@@ -284,7 +284,7 @@ module Multiture::MultisigWallet {
         };
     }
 
-    public fun withdraw_to<AssetType: copy + drop + store>(multisig_initiator: address, multisig_id: u64, proposal_id: u64)
+    public fun withdraw_to<AssetType>(multisig_initiator: address, multisig_id: u64, proposal_id: u64)
         acquires MultisigBank, PendingWithdrawalTransferRecord, DepositRecord
     {
         // get multisig and proposal from IDs
@@ -322,7 +322,7 @@ module Multiture::MultisigWallet {
         }
     }
 
-    public fun withdraw<AssetType: copy + drop + store>(auth_token: &AuthToken): Coin<AssetType>
+    public fun withdraw<AssetType>(auth_token: &AuthToken): Coin<AssetType>
         acquires MultisigBank, PendingAuthedWithdrawalRecord, DepositRecord
     {
         // get multisig and proposal from IDs in AuthToken
