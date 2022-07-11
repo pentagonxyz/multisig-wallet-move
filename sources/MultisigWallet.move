@@ -1,6 +1,4 @@
-address 0x2 {
-
-module Map {
+module 0x2::Map {
     native struct T<K, V> has copy, drop, store;
 
     native public fun empty<K, V>(): T<K, V>;
@@ -15,11 +13,7 @@ module Map {
     native public fun remove<K, V>(m: &T<K, V>, k: &K): V;
 }
 
-}
-
-address 0x2 {
-
-module Token {
+module 0x2::Token {
     struct Coin<AssetType: copy + drop> has store {
         type: AssetType,
         value: u64,
@@ -62,11 +56,7 @@ module Token {
     }
 }
 
-}
-
-address 0x5 {
-
-module MultisigWallet {
+module Multiture::MultisigWallet {
     use Std::Signer;
     use Std::Vector;
 
@@ -333,6 +323,4 @@ module MultisigWallet {
             multisig_coin
         }
     }
-}
-
 }
