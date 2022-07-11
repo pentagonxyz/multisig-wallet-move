@@ -109,7 +109,7 @@ module MultisigWallet {
         record: Map::T<ProposalID, u64>
     }
 
-    struct ProposalID has store {
+    struct ProposalID has store, drop {
         multisig_id: u64,
         proposal_id: u64
     }
@@ -207,7 +207,9 @@ module MultisigWallet {
         assert(exists<PendingWithdrawalRecord<AssetType>>(multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
         let record = &mut borrow_global_mut<PendingWithdrawalRecord<AssetType>>(multisig_initiator).record;
         let combined_id = ProposalID { multisig_id, proposal_id };
-        if (Map::contains_key(record, &combined_id)) Map::remove(record, &combined_id);
+        if (Map::contains_key(record, &combined_id)) {
+            Map::remove(record, &combined_id);
+        };
         Map::insert(record, combined_id, amount)
     }
 
