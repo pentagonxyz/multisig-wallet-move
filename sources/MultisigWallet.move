@@ -1,33 +1,17 @@
-module Multiture::Map {
-    native struct T<K, V> has copy, drop, store;
-
-    native public fun empty<K, V>(): T<K, V>;
-
-    native public fun get<K, V>(m: &T<K, V>, k: &K): &V;
-    native public fun get_mut<K, V>(m: &mut T<K, V>, k: &K): &mut V;
-
-    native public fun contains_key<K, V>(m: &T<K, V>, k: &K): bool;
-    // throws on duplicate as I don't feel like mocking up Option
-    native public fun insert<K, V>(m: &T<K, V>, k: K, v: V);
-    // throws on miss as I don't feel like mocking up Option
-    native public fun remove<K, V>(m: &T<K, V>, k: &K): V;
-}
-
-
 module Multiture::MultisigWallet {
     use Std::Signer;
     use Std::Vector;
 
     use AptosFramework::Coin::{Self, Coin};
-
-    use Multiture::Map; // TODO: Use AptosFramework::Table and AptosFramework::IterableTable?
+    use AptosFramework::IterableTable::{Self, IterableTable};
+    use AptosFramework::Table::{Self, Table};
 
     struct MultisigBank has key {
         multisigs: vector<Multisig>
     }
 
     struct Multisig has store {
-        participants: Map::T<address, bool>,
+        participants: IterableTable<address, bool>,
         approval_threshold: u64,
         cancellation_threshold: u64,
         proposals: vector<Proposal>
@@ -36,7 +20,7 @@ module Multiture::MultisigWallet {
     struct Proposal has store {
         creator: address,
         posted: bool,
-        votes: Map::T<address, bool>,
+        votes: Table<address, bool>,
         approval_votes: u64,
         cancellation_votes: u64,
         approve_messages: vector<vector<u8>>,
@@ -51,33 +35,33 @@ module Multiture::MultisigWallet {
     }
 
     struct DepositRecord<phantom AssetType> has key {
-        record: Map::T<u64, Coin<AssetType>>
+        record: Table<u64, Coin<AssetType>>
     }
 
     struct PendingAuthedWithdrawalRecord<phantom AssetType> has key {
-        record: Map::T<ProposalID, u64>
+        record: Table<ProposalID, u64>
     }
 
     struct PendingWithdrawalTransferRecord<phantom AssetType> has key {
-        record: Map::T<ProposalID, PendingWithdrawalTransfer>
+        record: Table<ProposalID, PendingWithdrawalTransfer>
     }
 
-    struct ProposalID has store, drop {
+    struct ProposalID has copy, drop, store {
         multisig_id: u64,
         proposal_id: u64
     }
 
-    struct PendingWithdrawalTransfer has store, drop {
+    struct PendingWithdrawalTransfer has drop, store {
         recipient: address,
         amount: u64
     }
 
     public fun create_multisig(account: &signer, participants: vector<address>, approval_threshold: u64, cancellation_threshold: u64): u64 acquires MultisigBank {
         // create multisig resource
-        let multisig = Multisig { participants: Map::empty(), approval_threshold, cancellation_threshold, proposals: Vector::empty() };
+        let multisig = Multisig { participants: IterableTable::new(), approval_threshold, cancellation_threshold, proposals: Vector::empty() };
         while (!Vector::is_empty(&participants)) {
             let participant = Vector::pop_back(&mut participants);
-            Map::insert(&mut multisig.participants, participant, true);
+            IterableTable::add(&mut multisig.participants, participant, true);
         };
 
         // create multisig bank or add to existing
@@ -98,9 +82,9 @@ module Multiture::MultisigWallet {
         assert!(!exists<DepositRecord<AssetType>>(sender), 1000); // DEPOSITS_ALREADY_ENABLED
 
         // add deposit record and withdrawal request record
-        move_to(account, DepositRecord<AssetType> { record: Map::empty() });
-        move_to(account, PendingAuthedWithdrawalRecord<AssetType> { record: Map::empty() });
-        move_to(account, PendingWithdrawalTransferRecord<AssetType> { record: Map::empty() });
+        move_to(account, DepositRecord<AssetType> { record: Table::new() });
+        move_to(account, PendingAuthedWithdrawalRecord<AssetType> { record: Table::new() });
+        move_to(account, PendingWithdrawalTransferRecord<AssetType> { record: Table::new() });
     }
 
     public fun deposit<AssetType>(multisig_initiator: address, multisig_id: u64, coin: Coin<AssetType>) acquires DepositRecord {
@@ -109,11 +93,11 @@ module Multiture::MultisigWallet {
 
         // insert coin (if coin already exists, first remove old coin and combine with new coin before reinserting combined coin)
         let record = &mut borrow_global_mut<DepositRecord<AssetType>>(multisig_initiator).record;
-        if (Map::contains_key(record, &multisig_id)) {
-            let old_coin = Map::remove(record, &multisig_id);
+        if (Table::contains(record, multisig_id)) {
+            let old_coin = Table::remove(record, multisig_id);
             Coin::merge(&mut coin, old_coin);
         };
-        Map::insert(record, multisig_id, coin);
+        Table::add(record, multisig_id, coin);
     }
 
     public fun create_proposal(
@@ -135,7 +119,7 @@ module Multiture::MultisigWallet {
         Vector::push_back(&mut multisig.proposals, Proposal {
             creator: sender,
             posted: false,
-            votes: Map::empty(),
+            votes: Table::new(),
             approval_votes: 0,
             cancellation_votes: 0,
             add_participants,
@@ -166,10 +150,10 @@ module Multiture::MultisigWallet {
         assert(exists<PendingAuthedWithdrawalRecord<AssetType>>(multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
         let record = &mut borrow_global_mut<PendingAuthedWithdrawalRecord<AssetType>>(multisig_initiator).record;
         let combined_id = ProposalID { multisig_id, proposal_id };
-        if (Map::contains_key(record, &combined_id)) {
-            Map::remove(record, &combined_id);
+        if (Table::contains(record, combined_id)) {
+            Table::remove(record, combined_id);
         };
-        Map::insert(record, combined_id, amount)
+        Table::add(record, combined_id, amount)
     }
 
     public fun request_withdrawal_transfer<AssetType>(account: &signer, multisig_initiator: address, multisig_id: u64, proposal_id: u64, recipient: address, amount: u64)
@@ -194,11 +178,11 @@ module Multiture::MultisigWallet {
         assert(exists<PendingWithdrawalTransferRecord<AssetType>>(multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
         let record = &mut borrow_global_mut<PendingWithdrawalTransferRecord<AssetType>>(multisig_initiator).record;
         let combined_id = ProposalID { multisig_id, proposal_id };
-        if (Map::contains_key(record, &combined_id)) {
-            Map::remove(record, &combined_id);
+        if (Table::contains(record, combined_id)) {
+            Table::remove(record, combined_id);
         };
         let transfer_data = PendingWithdrawalTransfer { recipient, amount };
-        Map::insert(record, combined_id, transfer_data)
+        Table::add(record, combined_id, transfer_data)
     }
 
     public fun post_proposal(account: &signer, multisig_initiator: address, multisig_id: u64, proposal_id: u64): AuthToken acquires MultisigBank {
@@ -239,18 +223,18 @@ module Multiture::MultisigWallet {
 
         // check participant is part of multisig
         let sender = Signer::address_of(account);
-        assert!(Map::contains_key(&multisig.participants, &sender) && *Map::get(&multisig.participants, &sender), 1000); // UNAUTHORIZED_PARTICIPANT
+        assert!(IterableTable::contains(&multisig.participants, sender) && *IterableTable::borrow(&multisig.participants, sender), 1000); // UNAUTHORIZED_PARTICIPANT
 
         // remove old vote if necessary
-        if (Map::contains_key(&proposal.votes, &sender)) {
-            let old_vote = Map::remove(&mut proposal.votes, &sender);
+        if (Table::contains(&proposal.votes, sender)) {
+            let old_vote = Table::remove(&mut proposal.votes, sender);
             assert!(vote != old_vote, 1000); // VOTE_NOT_CHANGED
             if (old_vote) *&mut proposal.approval_votes = *&proposal.approval_votes - 1
             else *&mut proposal.cancellation_votes = *&proposal.cancellation_votes - 1;
         };
 
         // cast new vote
-        Map::insert(&mut proposal.votes, sender, vote);
+        Table::add(&mut proposal.votes, sender, vote);
         if (vote) *&mut proposal.approval_votes = *&proposal.approval_votes + 1
         else *&mut proposal.cancellation_votes = *&proposal.cancellation_votes + 1;
     }
@@ -274,13 +258,13 @@ module Multiture::MultisigWallet {
         // execute removals
         while (!Vector::is_empty(&proposal.remove_participants)) {
             let participant = Vector::pop_back(&mut proposal.remove_participants);
-            Map::remove(&mut multisig.participants, &participant);
+            IterableTable::remove(&mut multisig.participants, participant);
         };
 
         // execute additions
         while (!Vector::is_empty(&proposal.add_participants)) {
             let participant = Vector::pop_back(&mut proposal.add_participants);
-            Map::insert(&mut multisig.participants, participant, true);
+            IterableTable::add(&mut multisig.participants, participant, true);
         };
     }
 
@@ -303,19 +287,19 @@ module Multiture::MultisigWallet {
         assert!(exists<PendingWithdrawalTransferRecord<AssetType>>(multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
         let record = &mut borrow_global_mut<PendingWithdrawalTransferRecord<AssetType>>(multisig_initiator).record;
         let combined_id = ProposalID { multisig_id, proposal_id };
-        assert!(Map::contains_key(record, &combined_id), 1000); // ASSET_NOT_IN_PROPOSAL
-        let transfer_data = Map::remove(record, &combined_id);
+        assert!(Table::contains(record, combined_id), 1000); // ASSET_NOT_IN_PROPOSAL
+        let transfer_data = Table::remove(record, combined_id);
 
         // withdraw tokens (if less than total, withdraw and reinsert)
         let record = &mut borrow_global_mut<DepositRecord<AssetType>>(multisig_initiator).record;
-        assert!(Map::contains_key(record, &multisig_id), 1000); // INSUFFICIENT_FUNDS
-        let multisig_coin = Map::remove(record, &multisig_id);
+        assert!(Table::contains(record, multisig_id), 1000); // INSUFFICIENT_FUNDS
+        let multisig_coin = Table::remove(record, multisig_id);
         let funds_available = Coin::value(&multisig_coin);
         assert!(funds_available >= transfer_data.amount, 1000); // INSUFFICIENT_FUNDS
 
         if (funds_available > transfer_data.amount) {
             let coin_out = Coin::extract(&mut multisig_coin, transfer_data.amount);
-            Map::insert(record, multisig_id, multisig_coin);
+            Table::add(record, multisig_id, multisig_coin);
             Coin::deposit(transfer_data.recipient, coin_out)
         } else {
             Coin::deposit(transfer_data.recipient, multisig_coin)
@@ -341,19 +325,19 @@ module Multiture::MultisigWallet {
         assert!(exists<PendingAuthedWithdrawalRecord<AssetType>>(auth_token.multisig_initiator), 1000); // ASSET_NOT_SUPPORTED
         let record = &mut borrow_global_mut<PendingAuthedWithdrawalRecord<AssetType>>(auth_token.multisig_initiator).record;
         let combined_id = ProposalID { multisig_id: auth_token.multisig_id, proposal_id: auth_token.proposal_id };
-        assert!(Map::contains_key(record, &combined_id), 1000); // ASSET_NOT_IN_PROPOSAL
-        let withdrawal_amount = Map::remove(record, &combined_id);
+        assert!(Table::contains(record, combined_id), 1000); // ASSET_NOT_IN_PROPOSAL
+        let withdrawal_amount = Table::remove(record, combined_id);
 
         // withdraw tokens (if less than total, withdraw and reinsert)
         let record = &mut borrow_global_mut<DepositRecord<AssetType>>(auth_token.multisig_initiator).record;
-        assert!(Map::contains_key(record, &auth_token.multisig_id), 1000); // INSUFFICIENT_FUNDS
-        let multisig_coin = Map::remove(record, &auth_token.multisig_id);
+        assert!(Table::contains(record, auth_token.multisig_id), 1000); // INSUFFICIENT_FUNDS
+        let multisig_coin = Table::remove(record, auth_token.multisig_id);
         let funds_available = Coin::value(&multisig_coin);
         assert!(funds_available >= withdrawal_amount, 1000); // INSUFFICIENT_FUNDS
 
         if (funds_available > withdrawal_amount) {
             let coin_out = Coin::extract(&mut multisig_coin, withdrawal_amount);
-            Map::insert(record, auth_token.multisig_id, multisig_coin);
+            Table::add(record, auth_token.multisig_id, multisig_coin);
             coin_out
         } else {
             multisig_coin
