@@ -1,4 +1,4 @@
-module Multiture::MultisigWallet {
+module multiture::multisig_wallet {
     use std::signer;
     use std::vector;
 
