@@ -52,7 +52,7 @@ module Multiture::MultisigWallet {
         record: VecMap<ProposalID, vector<u64>>
     }
 
-    struct PendingObjectTransferWithdrawalRecord<phantom T> has key {
+    struct PendingObjectWithdrawalTransferRecord<phantom T> has key {
         info: Info,
         record: VecMap<ProposalID, vector<PendingObjectWithdrawalTransfer>>
     }
@@ -93,7 +93,7 @@ module Multiture::MultisigWallet {
         // add deposit record and withdrawal request record
         transfer::share_object(ObjectDepositRecord<T> { info: object::new(ctx), record: vec_map::empty() });
         transfer::share_object(PendingAuthedObjectWithdrawalRecord<T> { info: object::new(ctx), record: vec_map::empty() });
-        transfer::share_object(PendingObjectTransferWithdrawalRecord<T> { info: object::new(ctx), record: vec_map::empty() });
+        transfer::share_object(PendingObjectWithdrawalTransferRecord<T> { info: object::new(ctx), record: vec_map::empty() });
     }
 
     public entry fun create_multisig(participants: vector<address>, approval_threshold: u64, cancellation_threshold: u64, ctx: &mut TxContext) {
@@ -424,5 +424,36 @@ module Multiture::MultisigWallet {
         };
 
         output
+    }
+
+    public fun withdraw_objects_to<T: key + store>(
+        multisig: &Multisig,
+        record1: &mut PendingObjectWithdrawalTransferRecord<T>,
+        record2: &mut ObjectDepositRecord<T>,
+        auth_token: &AuthToken
+    ) {
+        // get multisig ID and proposal from ID
+        let multisig_id = object::id(multisig);
+        assert!(*multisig_id == auth_token.multisig_id, 1000); // AUTH_TOKEN_MULTISIG_MISMATCH
+        let proposal = vector::borrow(&multisig.proposals, auth_token.proposal_id);
+
+        // make sure proposal has enough votes
+        assert!(proposal.approval_votes >= multisig.approval_threshold, 1000); // PROPOSAL_NOT_APPROVED
+        assert!(proposal.cancellation_votes < multisig.cancellation_threshold, 1000); // PROPOSAL_ALREADY_CANCELED
+
+        // get object IDs to be withdrawn and remove pending withdrawal from map
+        let combined_id = ProposalID { multisig_id: auth_token.multisig_id, proposal_id: auth_token.proposal_id };
+        assert!(vec_map::contains(&record1.record, &combined_id), 1000); // OBJECT_TYPE_NOT_IN_PROPOSAL
+        let (_, transfer_datas) = vec_map::remove(&mut record1.record, &combined_id);
+
+        // withdraw objects
+        assert!(vec_map::contains(&record2.record, &auth_token.multisig_id), 1000); // RECORD_NOT_FOUND
+        let objects = vec_map::get_mut(&mut record2.record, &auth_token.multisig_id);
+
+        while (!vector::is_empty(&transfer_datas)) {
+            let transfer_data = vector::pop_back(&mut transfer_datas);
+            let (_, object) = vec_map::remove(&mut objects.objects, &transfer_data.object_id);
+            transfer::transfer(object, transfer_data.recipient)
+        }
     }
 }
