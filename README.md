@@ -1,6 +1,6 @@
-# Multiture: A Dynamic Multisignature Wallet on Aptos
+# Multiture: A Dynamic Multisignature Wallet on Sui and Aptos
 
-Multiture is a dynamic (i.e., supports modifying participants) multisignature wallet (similar to Gnosis Safe) built on Aptos for storing [`Coin`s](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/Coin.move) and [`Token`s](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/Token.move).
+Multiture is a dynamic (i.e., supports modifying participants) multisignature wallet (similar to Gnosis Safe) built on Sui and Aptos for storing coins, tokens, and generic objects.
 
 ## Public Functions
 

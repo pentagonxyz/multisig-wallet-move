@@ -43,7 +43,11 @@ module Multiture::MultisigWallet {
     }
 
     struct ObjectDepositRecord<T> has key {
-        record: Table<u64, IterableTable<u64, T>>,
+        record: Table<u64, ObjectDeposit<T>>
+    }
+
+    struct ObjectDeposit<T> has store {
+        objects: IterableTable<u64, T>,
         next_id: u64
     }
 
@@ -73,13 +77,13 @@ module Multiture::MultisigWallet {
         amount: u64
     }
 
-    public fun initialize(root: &signer) {
+    public entry fun initialize(root: &signer) {
         assert!(Signer::address_of(root) == @Multiture, 1000); // INVALID_ROOT_SIGNER
         assert(!exists<MultisigBank>(@Multiture), 1000); // ALREADY_INITIALIZED
         move_to(root, MultisigBank { multisigs: Vector::empty<Multisig>() });
     }
 
-    public fun enable_deposits<AssetType>(root: &signer) {
+    public entry fun enable_deposits<AssetType>(root: &signer) {
         // validate deposits are not yet enabled
         assert!(Signer::address_of(root) == @Multiture, 1000); // INVALID_ROOT_SIGNER
         assert!(!exists<DepositRecord<AssetType>>(@Multiture), 1000); // DEPOSITS_ALREADY_ENABLED
@@ -90,13 +94,13 @@ module Multiture::MultisigWallet {
         move_to(root, PendingWithdrawalTransferRecord<AssetType> { record: Table::new() });
     }
 
-    public fun enable_object_deposits<T: store>(root: &signer) {
+    public entry fun enable_object_deposits<T: store>(root: &signer) {
         // validate deposits are not yet enabled
         assert!(Signer::address_of(root) == @Multiture, 1000); // INVALID_ROOT_SIGNER
         assert!(!exists<ObjectDepositRecord<T>>(@Multiture), 1000); // DEPOSITS_ALREADY_ENABLED
 
         // add deposit record and withdrawal request record
-        move_to(root, ObjectDepositRecord<T> { record: Table::new(), next_id: 0 });
+        move_to(root, ObjectDepositRecord<T> { record: Table::new() });
         move_to(root, PendingAuthedObjectWithdrawalRecord<T> { record: Table::new() });
     }
 
@@ -120,11 +124,11 @@ module Multiture::MultisigWallet {
         assert!(exists<ObjectDepositRecord<T>>(@Multiture), 1000); // ASSET_NOT_SUPPORTED
 
         // insert object
-        let record = borrow_global_mut<ObjectDepositRecord<T>>(@Multiture);
-        if (!Table::contains(&mut record.record, multisig_id)) Table::add(&mut record.record, multisig_id, IterableTable::new());
-        let objs = Table::borrow_mut(&mut record.record, multisig_id);
-        IterableTable::add(objs, record.next_id, obj);
-        *&mut record.next_id = record.next_id + 1;
+        let record = &mut borrow_global_mut<ObjectDepositRecord<T>>(@Multiture).record;
+        if (!Table::contains(record, multisig_id)) Table::add(record, multisig_id, ObjectDeposit { objects: IterableTable::new(), next_id: 0 });
+        let deposits = Table::borrow_mut(record, multisig_id);
+        IterableTable::add(&mut deposits.objects, deposits.next_id, obj);
+        *&mut deposits.next_id = deposits.next_id + 1;
     }
 
     public fun deposit<AssetType>(multisig_id: u64, coin: Coin<AssetType>) acquires DepositRecord {
@@ -138,6 +142,14 @@ module Multiture::MultisigWallet {
             Coin::merge(&mut coin, old_coin);
         };
         Table::add(record, multisig_id, coin);
+    }
+
+    public fun create_pending_token_withdrawal(tokenId: TokenId, value: u64, recipient: address): PendingTokenWithdrawal {
+        PendingTokenWithdrawal {
+            tokenId,
+            value,
+            recipient
+        }
     }
 
     public fun create_proposal(
@@ -156,6 +168,7 @@ module Multiture::MultisigWallet {
 
         // add proposal
         let sender = Signer::address_of(account);
+        assert!(IterableTable::contains(&multisig.participants, sender), 1000); // SENDER_NOT_AUTHORIZED
         Vector::push_back(&mut multisig.proposals, Proposal {
             creator: sender,
             posted: false,
@@ -169,7 +182,7 @@ module Multiture::MultisigWallet {
         });
     }
 
-    public fun request_authed_object_withdrawal<T: store>(account: &signer, multisig_id: u64, proposal_id: u64, ids: vector<u64>)
+    public entry fun request_authed_object_withdrawal<T: store>(account: &signer, multisig_id: u64, proposal_id: u64, ids: vector<u64>)
         acquires MultisigBank, PendingAuthedObjectWithdrawalRecord
     {
         // get multisig and proposal from IDs
@@ -197,7 +210,7 @@ module Multiture::MultisigWallet {
         Table::add(record, combined_id, ids)
     }
 
-    public fun request_authed_withdrawal<AssetType>(account: &signer, multisig_id: u64, proposal_id: u64, amount: u64)
+    public entry fun request_authed_withdrawal<AssetType>(account: &signer, multisig_id: u64, proposal_id: u64, amount: u64)
         acquires MultisigBank, PendingAuthedWithdrawalRecord
     {
         // get multisig and proposal from IDs
@@ -225,7 +238,7 @@ module Multiture::MultisigWallet {
         Table::add(record, combined_id, amount)
     }
 
-    public fun request_withdrawal_transfer<AssetType>(account: &signer, multisig_id: u64, proposal_id: u64, recipient: address, amount: u64)
+    public entry fun request_withdrawal_transfer<AssetType>(account: &signer, multisig_id: u64, proposal_id: u64, recipient: address, amount: u64)
         acquires MultisigBank, PendingWithdrawalTransferRecord
     {
         // get multisig and proposal from IDs
@@ -277,7 +290,7 @@ module Multiture::MultisigWallet {
         AuthToken { multisig_id, proposal_id }
     }
 
-    public fun cast_vote(account: &signer, multisig_id: u64, proposal_id: u64, vote: bool) acquires MultisigBank {
+    public entry fun cast_vote(account: &signer, multisig_id: u64, proposal_id: u64, vote: bool) acquires MultisigBank {
         // get multisig and proposal from IDs
         assert!(exists<MultisigBank>(@Multiture), 1000); // MULTISIG_BANK_DOES_NOT_EXIST
         let multisigs = &mut borrow_global_mut<MultisigBank>(@Multiture).multisigs;
@@ -308,7 +321,7 @@ module Multiture::MultisigWallet {
         else *&mut proposal.cancellation_votes = *&proposal.cancellation_votes + 1;
     }
 
-    public fun execute_participant_changes(multisig_id: u64, proposal_id: u64) acquires MultisigBank {
+    public entry fun execute_participant_changes(multisig_id: u64, proposal_id: u64) acquires MultisigBank {
         // get multisig and proposal from IDs
         assert!(exists<MultisigBank>(@Multiture), 1000); // MULTISIG_BANK_DOES_NOT_EXIST
         let multisigs = &mut borrow_global_mut<MultisigBank>(@Multiture).multisigs;
@@ -338,7 +351,7 @@ module Multiture::MultisigWallet {
     }
 
     // note that this only executes Token withdrawals but not Coin withdrawals
-    public fun execute_token_withdrawals(dummy: &signer, multisig_id: u64, proposal_id: u64) acquires MultisigBank {
+    public entry fun execute_token_withdrawals(dummy: &signer, multisig_id: u64, proposal_id: u64) acquires MultisigBank {
         // get multisig and proposal from IDs
         assert!(exists<MultisigBank>(@Multiture), 1000); // MULTISIG_BANK_DOES_NOT_EXIST
         let multisigs = &mut borrow_global_mut<MultisigBank>(@Multiture).multisigs;
@@ -368,7 +381,7 @@ module Multiture::MultisigWallet {
         };
     }
 
-    public fun withdraw_to<AssetType>(multisig_id: u64, proposal_id: u64)
+    public entry fun withdraw_to<AssetType>(multisig_id: u64, proposal_id: u64)
         acquires MultisigBank, PendingWithdrawalTransferRecord, DepositRecord
     {
         // get multisig and proposal from IDs
@@ -473,7 +486,7 @@ module Multiture::MultisigWallet {
         let output = Vector::empty<T>();
 
         while (!Vector::is_empty(&object_ids)) {
-            let object = IterableTable::remove(objects, Vector::pop_back(&mut object_ids));
+            let object = IterableTable::remove(&mut objects.objects, Vector::pop_back(&mut object_ids));
             Vector::push_back(&mut output, object);
         };
 

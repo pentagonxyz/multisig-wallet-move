@@ -1,0 +1,19 @@
+[package]
+name = "Multiture"
+version = "1.0.0"
+authors = ["David Lucid <david@pentagon.xyz>"]
+
+[addresses]
+std = "0x1"
+sui = "0x2"
+Multiture = "0x0"
+
+[dependencies.MoveStdlib]
+git = "https://github.com/MystenLabs/sui.git"
+subdir = "crates/sui-framework/deps/move-stdlib"
+rev = "fa973184a13579108a45965f7ff0fc3f2e2dc753"
+
+[dependencies.Sui]
+git = "https://github.com/MystenLabs/sui.git"
+subdir = "crates/sui-framework"
+rev = "fa973184a13579108a45965f7ff0fc3f2e2dc753"
